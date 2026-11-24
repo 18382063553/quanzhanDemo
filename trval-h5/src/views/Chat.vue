@@ -13,8 +13,8 @@ const isStreaming = ref(false)
 const messageList = ref([])
 const quickQuestions = ref([
   '北京有哪些必去的景点？',
-  '上海美食推荐',
-  '成都三日游攻略',
+  '上海美食推荐！',
+  '成都三日游攻略！',
   '如何选择旅行保险？'
 ])
 
