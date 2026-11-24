@@ -1,8 +1,12 @@
 <script setup>
 import { ref, reactive } from 'vue'
-const active = ref(0)
 import { useRouter } from 'vue-router'
+import { fetchStream } from '../utils/request'
+import { showToast } from 'vant'
+import ChatBubble from '../components/ChatBubble.vue'
+
 const router = useRouter()
+const active = ref(0)
 const goBack = () => {
   router.back()
 }
@@ -18,22 +22,74 @@ const quickQuestions = ref([
   '如何选择旅行保险？'
 ])
 
-const sendMessage = () => {
+const chatContainer = ref(null)
+// 滚到底部
+const scrollToBottom = () => {
+  if (chatContainer.value) {
+    chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+  }
+}
 
+const sendMessage = () => {
+  const msg = inputMessage.value.trim()
+  if (!msg || isStreaming.value) {
+    return
+  }
+  addUserMessage(msg)
+  fetchAIResponse()
+}
+
+const fetchAIResponse = () => {
+  isStreaming.value = true
+  messageList.value.push({ id: Date.now() + 2, role: 'ai', content: '', timestamp: new Date().toISOString() })
+  let fullResponse = ''
+  fetchStream('/chat', { message: inputMessage.value }, (chunk) => {
+    fullResponse += chunk
+    // AI正在回复的消息
+    const lastMsg = messageList.value[messageList.value.length - 1]
+    if (lastMsg && lastMsg.role === 'ai') {
+      lastMsg.content = fullResponse
+    }
+    scrollToBottom()
+  }, () => {
+    inputMessage.value = ''
+    // AI回复完成
+    isStreaming.value = false
+    scrollToBottom()
+  }, (err) => {
+    const lastMsg = messageList.value[messageList.value.length - 1]
+    if (lastMsg && lastMsg.role === 'ai') {
+      lastMsg.content = `AI发生了错误${err}`
+    }
+    isStreaming.value = false
+    showToast('AI回复失败')
+    scrollToBottom()
+  })
+}
+
+
+const addUserMessage = (msg) => {
+  messageList.value.push({
+    id: Date.now() + 1,
+    content: msg,
+    role: 'user',
+    timestamp: new Date().toISOString()
+  })
 }
 
 const handleQuickClick = (tag) => {
+  console.log(tag)
   inputMessage.value = tag
-  inputMessage.value = ''
+  sendMessage()
 }
 </script>
 
 <template>
   <div class="page-container chat-page">
-    <div class="page-header">
+    <div class="page-header" style="height: 46px;">
       <van-nav-bar title="AI旅游助手" fixed left-arrow @click="goBack" />
     </div>
-    <div class="chat-container">
+    <div class="chat-container" ref="chatContainer">
       <!-- 默认展示 -->
       <div class="chat-empty" v-if="messageList.length === 0">
         <van-empty description="开始和 AI助手对话 吧！" />
@@ -46,9 +102,11 @@ const handleQuickClick = (tag) => {
         </div>
       </div>
       <!-- 对话内容 -->
-      <div class="message-list">
-        <div v-for="item in messageList" :key="item.id" class="message-item">
-          {{ item.content }}
+      <div class="message-list" v-else>
+        <ChatBubble v-for="item in messageList" :key="item.id" :message="item" />
+        <div v-if="isStreaming" class="streaming-indicator">
+          <van-loading type="spinner" size="20px" />
+          <span>AI正在思考中...</span>
         </div>
       </div>
     </div>
@@ -72,7 +130,8 @@ const handleQuickClick = (tag) => {
 }
 
 .chat-container {
-  flex: 1;
+  /* flex: 1; */
+  height: 630px;
   overflow-y: auto;
   padding: 16px;
   padding-bottom: 60px;

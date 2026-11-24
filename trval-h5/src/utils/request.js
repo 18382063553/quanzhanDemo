@@ -1,5 +1,5 @@
 import axios from "axios";
-import { showToast } from 'vant';
+import { showToast } from "vant";
 
 // Vite 项目统一使用 import.meta.env + VITE_ 前缀
 const baseURL = import.meta.env.VITE_BASE_API || "";
@@ -80,3 +80,78 @@ export default {
     return service.delete(url, { params });
   },
 };
+
+// 流式接口
+export async function fetchStream(url, data, onChunk, onComplete, onError) {
+  const controller = new AbortController();
+  const baseURL = "http://159.75.169.224:1236/api/travel";
+
+  try {
+    const response = await fetch(baseURL + url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let result = "";
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        // 处理缓冲区中最后一行
+        if (buffer.startsWith("data:")) {
+          handleLine(buffer.substring(5));
+        }
+        if (onComplete) onComplete(result);
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      // 按行切分，最后一行可能不完整，保留到下次处理
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        const text = line.trim();
+        if (!text.startsWith("data:")) continue;
+        handleLine(text.substring(5).trim());
+      }
+    }
+
+    function handleLine(jsonStr) {
+      if (!jsonStr) return;
+      if (jsonStr === "[DONE]") return;
+      try {
+        const jsonData = JSON.parse(jsonStr);
+        if (jsonData.type == "chunk") {
+          result += jsonData.content || "";
+          if (onChunk) onChunk(jsonData.content || "");
+        } else if (jsonData.done) {
+          if (onComplete) onComplete(result);
+        } else if (jsonData.error) {
+          if (onError) onError(jsonData.error);
+        }
+      } catch (error) {
+        console.error("流式数据解析失败:", jsonStr);
+      }
+    }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      console.log("请求被中止");
+    } else {
+      if (onError) onError(err);
+    }
+  }
+
+  return () => controller.abort();
+}
